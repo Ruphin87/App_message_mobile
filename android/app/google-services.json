@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "312497458452",
+    "project_id": "message-ko",
+    "storage_bucket": "message-ko.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:312497458452:android:4e91d2ea203a6b12b50601",
+        "android_client_info": {
+          "package_name": "com.example.message_ko"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCxDNjPw6LKqaGNTIHnj6FVwfI2orDW5Ao"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
