@@ -43,7 +43,7 @@ class UpdateService {
   /// ⚠️ À CHANGER avec l'URL réelle une fois le site (apk-download-site)
   /// déployé (ex: sur Vercel) — c'est vers cette page que le bouton "Voir
   /// la mise à jour" redirige l'utilisateur pour télécharger l'APK.
-  static const String downloadWebsiteUrl = 'https://echolink-download.vercel.app';
+  static const String downloadWebsiteUrl = 'https://updateapk.vercel.app';
 
   /// Interroge l'API GitHub et compare la dernière version publiée à la
   /// version actuellement installée (lue via `package_info_plus`, donc
