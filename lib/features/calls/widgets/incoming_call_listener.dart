@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../controllers/call_controller.dart';
-import 'incoming_call_screen.dart';
+import '../screens/incoming_call_screen.dart';
 
 /// Écoute les appels entrants pour l'utilisateur connecté et affiche, dès
 /// qu'un appel arrive, un écran plein écran façon WhatsApp (photo, nom,
