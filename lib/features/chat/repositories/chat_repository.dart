@@ -72,7 +72,9 @@ class ChatRepository {
       return conv.copyWith(otherUser: userRow != null ? UserModel.fromLocalDb(userRow) : null);
     }));
 
-    return enriched;
+    // Une conversation que l'utilisateur courant a supprimée de sa liste ne
+    // doit jamais réapparaître depuis le cache local.
+    return enriched.where((c) => !c.isHiddenFor(ownerId)).toList();
   }
 
   /// Liste des conversations de l'utilisateur courant depuis SUPABASE
@@ -98,6 +100,10 @@ class ChatRepository {
 
     final conversations = (response as List)
         .map((json) => ConversationModel.fromJson(json as Map<String, dynamic>))
+        // Une conversation supprimée par l'utilisateur courant ("Supprimer
+        // la conversation") ne doit plus apparaître dans sa liste, même si
+        // elle existe toujours côté serveur pour l'autre participant.
+        .where((c) => !c.isHiddenFor(currentUserId))
         .toList();
 
     if (conversations.isEmpty) return [];
@@ -278,8 +284,26 @@ class ChatRepository {
 
     final sent = MessageModel.fromJson(response);
     await _localDb.upsertMessages(currentUserId, [sent.toLocalDb()]);
+    await _reviveConversationIfHidden(conversationId);
 
     return sent;
+  }
+
+  /// Un nouveau message rend la conversation à nouveau active : si l'un des
+  /// deux participants l'avait supprimée de sa liste ("Supprimer la
+  /// conversation"), elle doit réapparaître pour lui — exactement comme sur
+  /// WhatsApp, où recevoir un message dans une discussion supprimée la fait
+  /// revenir dans la liste. On vide simplement `deleted_for` à chaque envoi.
+  Future<void> _reviveConversationIfHidden(String conversationId) async {
+    try {
+      await _client
+          .from('conversations')
+          .update({'deleted_for': <String>[]})
+          .eq('id', conversationId);
+    } catch (_) {
+      // Best-effort : un échec ici ne doit jamais empêcher l'envoi du
+      // message, qui est déjà confirmé à ce stade.
+    }
   }
 
   Future<MessageModel> sendFileAttachment({
@@ -336,6 +360,7 @@ class ChatRepository {
         .eq('id', sent.id);
 
     await _localDb.upsertMessages(currentUserId, [sent.toLocalDb()]);
+    await _reviveConversationIfHidden(conversationId);
     return sent;
   }
 
@@ -557,6 +582,44 @@ class ChatRepository {
         })
         .eq('id', messageId)
         .eq('sender_id', currentUserId);
+  }
+
+  // ==================== SUPPRESSION DE CONVERSATION ====================
+
+  /// Supprime la conversation entière avec [otherUser] de la liste de
+  /// l'utilisateur courant ("Supprimer la conversation") — distinct de la
+  /// suppression d'un simple message : ici c'est toute la discussion entre
+  /// moi et cette personne qui disparaît de mon écran Messages.
+  ///
+  /// Même principe que `deleteMessageForMe` : on ajoute l'id de l'utilisateur
+  /// courant au tableau `deleted_for` de la ligne `conversations`, sans rien
+  /// supprimer côté serveur — l'autre participant garde donc sa conversation
+  /// et son historique de messages intacts. Si une nouvelle conversation
+  /// est recréée plus tard avec la même personne, l'ancienne ligne est
+  /// réutilisée par `getOrCreateConversation` mais n'est plus filtrée
+  /// puisqu'un nouveau message la fera réapparaître comme une conversation
+  /// normale au prochain chargement.
+  Future<void> deleteConversation(String conversationId) async {
+    final currentUserId = SupabaseService.currentUserId;
+    if (currentUserId == null) return;
+
+    final current = await _client
+        .from('conversations')
+        .select('deleted_for')
+        .eq('id', conversationId)
+        .single();
+
+    final deletedFor = ((current['deleted_for'] as List?) ?? [])
+        .map((e) => e as String)
+        .toSet();
+    deletedFor.add(currentUserId);
+
+    await _client
+        .from('conversations')
+        .update({'deleted_for': deletedFor.toList()})
+        .eq('id', conversationId);
+
+    await _localDb.deleteConversation(currentUserId, conversationId);
   }
 
   // ==================== RÉACTIONS EMOJI ====================

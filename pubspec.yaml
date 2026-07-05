@@ -31,6 +31,8 @@ dependencies:
   permission_handler: ^11.1.0
   crypto: ^3.0.3
   encrypt: ^5.0.3
+  http: ^1.2.0
+  package_info_plus: ^8.0.0
 
 dev_dependencies:
   flutter_test:
@@ -52,3 +54,5 @@ flutter:
     - .env
     - assets/icon/icon.png
     - assets/images/logo_eni.png
+    - assets/audio/ringback_tone.wav
+    - assets/audio/incoming_ringtone.wav

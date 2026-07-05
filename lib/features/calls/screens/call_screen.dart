@@ -8,6 +8,7 @@ import 'package:go_router/go_router.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../../../core/constants/app_colors.dart';
+import '../../../core/services/call_sound_service.dart';
 import '../../../core/widgets/user_avatar.dart';
 import '../../../models/call_model.dart';
 import '../controllers/call_controller.dart';
@@ -36,12 +37,14 @@ class _CallScreenState extends ConsumerState<CallScreen> {
   MediaStream? _localStream;
   StreamSubscription<List<CallEventModel>>? _eventsSubscription;
   StreamSubscription<CallModel?>? _callSubscription;
+  Timer? _ringingTimeoutTimer;
 
   bool _isReady = false;
   bool _isConnected = false;
   bool _isMuted = false;
   bool _isCameraOff = false;
   bool _hasRemoteDescription = false;
+  bool _callAccepted = false;
   String? _statusText;
 
   bool get _isVideoCall => widget.args.mediaType == CallMediaType.video;
@@ -62,6 +65,7 @@ class _CallScreenState extends ConsumerState<CallScreen> {
       if (!hasPermissions) {
         if (!mounted) return;
         setState(() => _statusText = 'Permissions requises');
+        await _failAndClose('permissions_refusees');
         return;
       }
 
@@ -72,6 +76,11 @@ class _CallScreenState extends ConsumerState<CallScreen> {
 
       if (widget.args.isCaller) {
         await _createOffer();
+        // L'appelant entend la tonalité "ça sonne" tant que l'autre
+        // personne n'a pas décroché — exactement comme un appel
+        // téléphonique classique.
+        unawaited(CallSoundService.instance.playRingback());
+        _startRingingTimeout();
       } else {
         await ref.read(callRepositoryProvider).acceptCall(widget.callId);
       }
@@ -84,7 +93,23 @@ class _CallScreenState extends ConsumerState<CallScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Vérifiez les permissions micro/caméra.')),
       );
+      await _failAndClose('erreur_technique');
     }
+  }
+
+  /// Termine proprement l'appel côté serveur quand il ne peut pas démarrer
+  /// (permissions refusées, caméra/micro indisponible...) — sans ça, la
+  /// personne appelée continuerait de voir/entendre un appel entrant qui ne
+  /// mènera jamais nulle part.
+  Future<void> _failAndClose(String reason) async {
+    _ringingTimeoutTimer?.cancel();
+    await CallSoundService.instance.stop();
+    try {
+      await ref.read(callRepositoryProvider).failCall(widget.callId, reason);
+    } catch (_) {
+      // Best-effort.
+    }
+    _closeAfterDelay();
   }
 
   Future<bool> _ensureCallPermissions() async {
@@ -163,6 +188,8 @@ class _CallScreenState extends ConsumerState<CallScreen> {
     pc.onTrack = (event) {
       if (event.streams.isEmpty) return;
       _remoteRenderer.srcObject = event.streams.first;
+      CallSoundService.instance.stop();
+      _ringingTimeoutTimer?.cancel();
       if (mounted) {
         setState(() {
           _isConnected = true;
@@ -174,6 +201,8 @@ class _CallScreenState extends ConsumerState<CallScreen> {
     pc.onConnectionState = (state) {
       if (!mounted) return;
       if (state == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
+        CallSoundService.instance.stop();
+        _ringingTimeoutTimer?.cancel();
         setState(() {
           _isConnected = true;
           _statusText = 'Connecté';
@@ -181,9 +210,32 @@ class _CallScreenState extends ConsumerState<CallScreen> {
       } else if (state == RTCPeerConnectionState.RTCPeerConnectionStateDisconnected ||
           state == RTCPeerConnectionState.RTCPeerConnectionStateFailed ||
           state == RTCPeerConnectionState.RTCPeerConnectionStateClosed) {
+        CallSoundService.instance.stop();
         setState(() => _statusText = 'Appel terminé');
       }
     };
+  }
+
+  /// Comme un vrai téléphone : si personne ne décroche après un délai
+  /// raisonnable, l'appel est automatiquement marqué "manqué" côté serveur
+  /// (ce qui fera immédiatement disparaître l'écran d'appel entrant chez
+  /// le destinataire) et se termine ici aussi.
+  void _startRingingTimeout() {
+    _ringingTimeoutTimer?.cancel();
+    _ringingTimeoutTimer = Timer(const Duration(seconds: 45), () async {
+      if (!mounted || _callAccepted || _isConnected) return;
+      await CallSoundService.instance.stop();
+      try {
+        await ref.read(callRepositoryProvider).missedCall(widget.callId);
+      } catch (_) {
+        // Au pire, l'appel restera "ringing" en base — pas bloquant pour
+        // fermer l'écran localement.
+      }
+      if (mounted) {
+        setState(() => _statusText = 'Pas de réponse');
+      }
+      _closeAfterDelay();
+    });
   }
 
   Future<void> _createOffer() async {
@@ -278,17 +330,28 @@ class _CallScreenState extends ConsumerState<CallScreen> {
     _callSubscription = ref.read(callRepositoryProvider).watchCall(widget.callId).listen((call) {
       if (!mounted) return;
       if (call == null) {
+        CallSoundService.instance.stop();
+        _ringingTimeoutTimer?.cancel();
         setState(() => _statusText = 'Appel terminé');
         _closeAfterDelay();
         return;
       }
       if (call.status == CallStatus.declined) {
+        CallSoundService.instance.stop();
+        _ringingTimeoutTimer?.cancel();
         setState(() => _statusText = 'Appel refusé');
         _closeAfterDelay();
-      } else if (call.status == CallStatus.ended || call.status == CallStatus.missed) {
+      } else if (call.status == CallStatus.ended ||
+          call.status == CallStatus.missed ||
+          call.status == CallStatus.failed) {
+        CallSoundService.instance.stop();
+        _ringingTimeoutTimer?.cancel();
         setState(() => _statusText = 'Appel terminé');
         _closeAfterDelay();
       } else if (call.status == CallStatus.accepted) {
+        _callAccepted = true;
+        CallSoundService.instance.stop();
+        _ringingTimeoutTimer?.cancel();
         setState(() => _statusText = _isConnected ? 'Connecté' : 'Connexion...');
       }
     });
@@ -325,8 +388,17 @@ class _CallScreenState extends ConsumerState<CallScreen> {
   }
 
   Future<void> _endCall() async {
+    _ringingTimeoutTimer?.cancel();
+    await CallSoundService.instance.stop();
     try {
-      await ref.read(callRepositoryProvider).endCall(widget.callId);
+      // Si j'annule l'appel avant que l'autre personne ait décroché, ça
+      // doit apparaître comme un "appel manqué" chez elle (comme sur un
+      // vrai téléphone) plutôt que comme un appel normalement terminé.
+      if (widget.args.isCaller && !_callAccepted) {
+        await ref.read(callRepositoryProvider).missedCall(widget.callId);
+      } else {
+        await ref.read(callRepositoryProvider).endCall(widget.callId);
+      }
     } catch (_) {
       // La fermeture locale reste prioritaire si le réseau coupe au même moment.
     }
@@ -335,6 +407,8 @@ class _CallScreenState extends ConsumerState<CallScreen> {
 
   @override
   void dispose() {
+    _ringingTimeoutTimer?.cancel();
+    CallSoundService.instance.stop();
     _eventsSubscription?.cancel();
     _callSubscription?.cancel();
     _localRenderer.dispose();

@@ -101,6 +101,27 @@ class ChatListNotifier extends StateNotifier<ChatListState> {
     });
   }
 
+  /// Supprime toute la conversation avec cette personne de MA liste
+  /// (optimiste : elle disparaît immédiatement de l'écran), sans toucher à
+  /// ses messages ni à la conversation de l'autre participant.
+  Future<void> deleteConversation(String conversationId) async {
+    final previous = state.conversations;
+    state = state.copyWith(
+      conversations: previous.where((c) => c.id != conversationId).toList(),
+    );
+    try {
+      await _repository.deleteConversation(conversationId);
+    } catch (e) {
+      if (!mounted) return;
+      // Échec réseau : on restaure la conversation dans la liste plutôt que
+      // de laisser croire à l'utilisateur qu'elle a bien été supprimée.
+      state = state.copyWith(
+        conversations: previous,
+        error: 'Erreur lors de la suppression de la conversation',
+      );
+    }
+  }
+
   @override
   void dispose() {
     _debounceTimer?.cancel();

@@ -22,7 +22,7 @@ class LocalDatabaseService {
   static final LocalDatabaseService instance = LocalDatabaseService._();
 
   static const _dbName = 'message_ko_local.db';
-  static const _dbVersion = 2;
+  static const _dbVersion = 3;
 
   Database? _db;
 
@@ -78,6 +78,7 @@ class LocalDatabaseService {
             other_user_id TEXT,
             last_message TEXT,
             unread_count INTEGER NOT NULL DEFAULT 0,
+            deleted_for TEXT NOT NULL DEFAULT '',
             PRIMARY KEY (owner_id, id)
           )
         ''');
@@ -147,6 +148,14 @@ class LocalDatabaseService {
           ''');
           await db.execute(
             'CREATE INDEX IF NOT EXISTS idx_local_reactions_message ON local_message_reactions(owner_id, message_id)',
+          );
+        }
+        if (oldVersion < 3) {
+          // Bases créées avant l'ajout de la suppression de conversation
+          // entière (distincte de la suppression d'un message) : on ajoute
+          // la colonne manquante sans perdre le cache déjà présent.
+          await db.execute(
+            "ALTER TABLE local_conversations ADD COLUMN deleted_for TEXT NOT NULL DEFAULT ''",
           );
         }
       },
@@ -255,6 +264,18 @@ class LocalDatabaseService {
       where: 'owner_id = ?',
       whereArgs: [ownerId],
       orderBy: 'last_message_at DESC',
+    );
+  }
+
+  /// Retire une conversation du cache local (utilisé après une suppression
+  /// de conversation réussie côté serveur, pour qu'elle disparaisse
+  /// immédiatement de la liste sans attendre le prochain sync réseau).
+  Future<void> deleteConversation(String ownerId, String conversationId) async {
+    final db = await database;
+    await db.delete(
+      'local_conversations',
+      where: 'owner_id = ? AND id = ?',
+      whereArgs: [ownerId, conversationId],
     );
   }
 

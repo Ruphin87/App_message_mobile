@@ -11,6 +11,7 @@ import '../../features/auth/screens/forgot_password_screen.dart';
 import '../../features/profile/screens/profile_screen.dart';
 import '../../features/profile/screens/edit_profile_screen.dart';
 import '../../features/contacts/screens/contacts_screen.dart';
+import '../../features/contacts/screens/friend_profile_screen.dart';
 import '../../features/contacts/screens/search_user_screen.dart';
 import '../../features/contacts/screens/friend_requests_screen.dart';
 import '../../features/calls/screens/call_screen.dart';
@@ -21,6 +22,7 @@ import '../../features/notifications/screens/notifications_screen.dart';
 import '../../features/notifications/controllers/notification_controller.dart';
 import '../../features/splash/screens/splash_screen.dart';
 import '../../features/settings/screens/settings_screen.dart';
+import '../../features/settings/screens/update_screen.dart';
 import '../../features/about/screens/about_screen.dart';
 import '../../features/admin/screens/admin_auth_screen.dart';
 import '../../features/admin/screens/admin_dashboard_screen.dart';
@@ -29,7 +31,14 @@ import '../../models/call_model.dart';
 import '../../models/user_model.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
-  final authState = ref.watch(authProvider);
+  // IMPORTANT : on n'écoute QUE le statut d'authentification, pas tout
+  // AuthState. Si on écoutait tout l'état (ref.watch(authProvider)), le
+  // moindre changement de "isLoading" (ex: pendant l'envoi du code de
+  // récupération de mot de passe) reconstruirait entièrement le GoRouter
+  // -> un nouveau Navigator -> l'écran ForgotPasswordScreen serait détruit
+  // et recréé, ce qui réinitialisait sa variable locale d'étape (_step)
+  // et empêchait de jamais avancer vers l'écran de saisie du code.
+  final authStatus = ref.watch(authProvider.select((state) => state.status));
 
   return GoRouter(
     initialLocation: AppRoutes.splash,
@@ -43,7 +52,7 @@ final routerProvider = Provider<GoRouter>((ref) {
         return null;
       }
 
-      final isAuthenticated = authState.status == AuthStatus.authenticated;
+      final isAuthenticated = authStatus == AuthStatus.authenticated;
       final isAuthRoute = state.matchedLocation == AppRoutes.login ||
           state.matchedLocation == AppRoutes.register ||
           state.matchedLocation == AppRoutes.forgotPassword;
@@ -91,6 +100,13 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => const FriendRequestsScreen(),
       ),
       GoRoute(
+        path: AppRoutes.friendProfile,
+        builder: (context, state) {
+          final user = state.extra as UserModel;
+          return FriendProfileScreen(user: user);
+        },
+      ),
+      GoRoute(
         path: '${AppRoutes.chat}/:userId',
         builder: (context, state) {
           final otherUser = state.extra as UserModel;
@@ -115,6 +131,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: AppRoutes.settings,
         builder: (context, state) => const SettingsScreen(),
+      ),
+      GoRoute(
+        path: AppRoutes.update,
+        builder: (context, state) => const UpdateScreen(),
       ),
       GoRoute(
         path: AppRoutes.about,

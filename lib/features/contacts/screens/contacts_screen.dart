@@ -154,11 +154,14 @@ class ContactsScreen extends ConsumerWidget {
       ),
       child: ListTile(
         leading: profile != null
-            ? UserAvatar(
-                userId: profile.id,
-                photoUrl: profile.photo,
-                radius: 24,
-                showOnlineBadge: true,
+            ? GestureDetector(
+                onTap: () => context.push(AppRoutes.friendProfile, extra: profile),
+                child: UserAvatar(
+                  userId: profile.id,
+                  photoUrl: profile.photo,
+                  radius: 24,
+                  showOnlineBadge: true,
+                ),
               )
             : const CircleAvatar(
                 radius: 24,

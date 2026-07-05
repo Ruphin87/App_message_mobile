@@ -72,90 +72,144 @@ class ChatListScreen extends ConsumerWidget {
       itemCount: state.conversations.length,
       itemBuilder: (context, index) {
         final conversation = state.conversations[index];
-        return _buildConversationTile(context, conversation);
+        return _buildConversationTile(context, ref, conversation);
       },
     );
   }
 
-  Widget _buildConversationTile(BuildContext context, ConversationModel conversation) {
-    final other = conversation.otherUser;
-    final hasUnread = conversation.unreadCount > 0;
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 2),
+  /// Demande confirmation avant de supprimer toute la conversation avec
+  /// [otherName] — bien distinct de la suppression d'un simple message :
+  /// c'est ici toute la discussion qui disparaît de MA liste (l'autre
+  /// participant garde la sienne intacte).
+  Future<bool> _confirmDeleteConversation(BuildContext context, String otherName) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Supprimer la conversation'),
+        content: Text(
+          'Voulez-vous supprimer toute la conversation avec $otherName ? '
+          'Elle sera retirée de votre liste, mais restera visible pour l\'autre personne.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Annuler'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            style: TextButton.styleFrom(foregroundColor: AppColors.error),
+            child: const Text('Supprimer'),
           ),
         ],
       ),
-      child: ListTile(
-        leading: other != null
-            ? UserAvatar(
-                userId: other.id,
-                photoUrl: other.photo,
-                radius: 24,
-                showOnlineBadge: true,
-              )
-            : const CircleAvatar(
-                radius: 24,
-                backgroundColor: AppColors.surfaceDark,
-                child: Icon(Icons.person, color: AppColors.textSecondary),
-              ),
-        title: Text(
-          other?.nom ?? 'Utilisateur',
-          style: TextStyle(
-            fontWeight: hasUnread ? FontWeight.bold : FontWeight.w600,
-            color: AppColors.textPrimary,
-          ),
+    );
+    return confirmed ?? false;
+  }
+
+  Widget _buildConversationTile(BuildContext context, WidgetRef ref, ConversationModel conversation) {
+    final other = conversation.otherUser;
+    final hasUnread = conversation.unreadCount > 0;
+    final otherName = other?.nom ?? 'Utilisateur';
+
+    return Dismissible(
+      key: ValueKey('conversation_${conversation.id}'),
+      direction: DismissDirection.endToStart,
+      confirmDismiss: (_) => _confirmDeleteConversation(context, otherName),
+      onDismissed: (_) {
+        ref.read(chatListProvider.notifier).deleteConversation(conversation.id);
+      },
+      background: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        alignment: Alignment.centerRight,
+        decoration: BoxDecoration(
+          color: AppColors.error,
+          borderRadius: BorderRadius.circular(12),
         ),
-        subtitle: Text(
-          conversation.lastMessage ?? 'Démarrer la conversation',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            color: hasUnread ? AppColors.textPrimary : AppColors.textSecondary,
-            fontWeight: hasUnread ? FontWeight.w600 : FontWeight.normal,
-          ),
-        ),
-        trailing: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            Text(
-              DateFormatters.conversationPreviewTime(conversation.lastMessageAt),
-              style: TextStyle(
-                fontSize: 12,
-                color: hasUnread ? AppColors.primary : AppColors.textHint,
-                fontWeight: hasUnread ? FontWeight.w600 : FontWeight.normal,
-              ),
+        child: const Icon(Icons.delete_outline, color: Colors.white),
+      ),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.05),
+              blurRadius: 10,
+              offset: const Offset(0, 2),
             ),
-            if (hasUnread) ...[
-              const SizedBox(height: 6),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                decoration: const BoxDecoration(
-                  color: AppColors.primary,
-                  shape: BoxShape.circle,
-                ),
-                child: Text(
-                  '${conversation.unreadCount}',
-                  style: const TextStyle(color: Colors.white, fontSize: 12),
-                ),
-              ),
-            ],
           ],
         ),
-        onTap: () {
-          if (other != null) {
-            context.push('${AppRoutes.chat}/${other.id}', extra: other);
-          }
-        },
+        child: ListTile(
+          leading: other != null
+              ? UserAvatar(
+                  userId: other.id,
+                  photoUrl: other.photo,
+                  radius: 24,
+                  showOnlineBadge: true,
+                )
+              : const CircleAvatar(
+                  radius: 24,
+                  backgroundColor: AppColors.surfaceDark,
+                  child: Icon(Icons.person, color: AppColors.textSecondary),
+                ),
+          title: Text(
+            otherName,
+            style: TextStyle(
+              fontWeight: hasUnread ? FontWeight.bold : FontWeight.w600,
+              color: AppColors.textPrimary,
+            ),
+          ),
+          subtitle: Text(
+            conversation.lastMessage ?? 'Démarrer la conversation',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: hasUnread ? AppColors.textPrimary : AppColors.textSecondary,
+              fontWeight: hasUnread ? FontWeight.w600 : FontWeight.normal,
+            ),
+          ),
+          trailing: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                DateFormatters.conversationPreviewTime(conversation.lastMessageAt),
+                style: TextStyle(
+                  fontSize: 12,
+                  color: hasUnread ? AppColors.primary : AppColors.textHint,
+                  fontWeight: hasUnread ? FontWeight.w600 : FontWeight.normal,
+                ),
+              ),
+              if (hasUnread) ...[
+                const SizedBox(height: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                  decoration: const BoxDecoration(
+                    color: AppColors.primary,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Text(
+                    '${conversation.unreadCount}',
+                    style: const TextStyle(color: Colors.white, fontSize: 12),
+                  ),
+                ),
+              ],
+            ],
+          ),
+          onTap: () {
+            if (other != null) {
+              context.push('${AppRoutes.chat}/${other.id}', extra: other);
+            }
+          },
+          onLongPress: () async {
+            final confirmed = await _confirmDeleteConversation(context, otherName);
+            if (confirmed) {
+              ref.read(chatListProvider.notifier).deleteConversation(conversation.id);
+            }
+          },
+        ),
       ),
     );
   }

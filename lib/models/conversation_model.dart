@@ -10,6 +10,7 @@ class ConversationModel {
     this.otherUser,
     this.lastMessage,
     this.unreadCount = 0,
+    this.deletedFor = const [],
   });
 
   final String id;
@@ -27,6 +28,13 @@ class ConversationModel {
   /// Nombre de messages non lus pour l'utilisateur courant.
   final int unreadCount;
 
+  /// Ids des utilisateurs ayant choisi de supprimer cette conversation de
+  /// leur propre liste ("Supprimer la conversation"). La conversation (et
+  /// tous ses messages) reste intacte pour l'autre participant — exactement
+  /// comme la suppression "pour moi" d'un message, mais appliquée à toute la
+  /// discussion d'un coup.
+  final List<String> deletedFor;
+
   factory ConversationModel.fromJson(Map<String, dynamic> json) {
     return ConversationModel(
       id: json['id'] as String,
@@ -39,6 +47,7 @@ class ConversationModel {
           : null,
       lastMessage: json['last_message'] as String?,
       unreadCount: json['unread_count'] as int? ?? 0,
+      deletedFor: (json['deleted_for'] as List?)?.map((e) => e as String).toList() ?? [],
     );
   }
 
@@ -49,6 +58,7 @@ class ConversationModel {
       'user2': user2,
       'created_at': createdAt.toUtc().toIso8601String(),
       'last_message_at': lastMessageAt.toUtc().toIso8601String(),
+      'deleted_for': deletedFor,
     };
   }
 
@@ -65,6 +75,10 @@ class ConversationModel {
       lastMessageAt: DateTime.parse(row['last_message_at'] as String).toLocal(),
       lastMessage: row['last_message'] as String?,
       unreadCount: row['unread_count'] as int? ?? 0,
+      deletedFor: (row['deleted_for'] as String? ?? '')
+          .split(',')
+          .where((s) => s.isNotEmpty)
+          .toList(),
     );
   }
 
@@ -82,6 +96,7 @@ class ConversationModel {
       'other_user_id': otherUserId(currentUserId),
       'last_message': lastMessage,
       'unread_count': unreadCount,
+      'deleted_for': deletedFor.join(','),
     };
   }
 
@@ -89,6 +104,11 @@ class ConversationModel {
   String otherUserId(String currentUserId) {
     return user1 == currentUserId ? user2 : user1;
   }
+
+  /// true si CET utilisateur a supprimé cette conversation de sa liste —
+  /// dans ce cas elle doit être totalement masquée pour lui, comme si elle
+  /// n'existait pas, sans affecter l'autre participant.
+  bool isHiddenFor(String userId) => deletedFor.contains(userId);
 
   ConversationModel copyWith({
     String? id,
@@ -99,6 +119,7 @@ class ConversationModel {
     UserModel? otherUser,
     String? lastMessage,
     int? unreadCount,
+    List<String>? deletedFor,
   }) {
     return ConversationModel(
       id: id ?? this.id,
@@ -109,6 +130,7 @@ class ConversationModel {
       otherUser: otherUser ?? this.otherUser,
       lastMessage: lastMessage ?? this.lastMessage,
       unreadCount: unreadCount ?? this.unreadCount,
+      deletedFor: deletedFor ?? this.deletedFor,
     );
   }
 

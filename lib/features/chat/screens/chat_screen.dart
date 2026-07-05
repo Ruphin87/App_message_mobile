@@ -14,6 +14,7 @@ import 'package:record/record.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_routes.dart';
+import '../../../core/services/download_service.dart';
 import '../../../core/utils/date_formatters.dart';
 import '../../../core/widgets/user_avatar.dart';
 import '../../../models/attachment_model.dart';
@@ -566,41 +567,45 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       backgroundColor: AppColors.surface,
       elevation: 0,
       titleSpacing: 0,
-      title: Row(
-        children: [
-          UserAvatar(
-            userId: widget.otherUser.id,
-            photoUrl: widget.otherUser.photo,
-            radius: 18,
-            showOnlineBadge: true,
-          ),
-          const SizedBox(width: 12),
-          Flexible(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  widget.otherUser.nom,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.textPrimary,
-                  ),
-                ),
-                Text(
-                  isOnline ? 'En ligne' : 'Inactif',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: isOnline ? AppColors.success : AppColors.textSecondary,
-                  ),
-                ),
-              ],
+      title: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: () => context.push(AppRoutes.friendProfile, extra: widget.otherUser),
+        child: Row(
+          children: [
+            UserAvatar(
+              userId: widget.otherUser.id,
+              photoUrl: widget.otherUser.photo,
+              radius: 18,
+              showOnlineBadge: true,
             ),
-          ),
-        ],
+            const SizedBox(width: 12),
+            Flexible(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    widget.otherUser.nom,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                  Text(
+                    isOnline ? 'En ligne' : 'Inactif',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: isOnline ? AppColors.success : AppColors.textSecondary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
       actions: [
         IconButton(
@@ -857,12 +862,21 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         onTap: () => _openAttachment(attachment.fileUrl),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(12),
-          child: Image.network(
-            attachment.fileUrl,
-            width: 220,
-            height: 180,
-            fit: BoxFit.cover,
-            errorBuilder: (_, __, ___) => _buildFileTile(attachment, isMine, icon),
+          child: Stack(
+            children: [
+              Image.network(
+                attachment.fileUrl,
+                width: 220,
+                height: 180,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => _buildFileTile(attachment, isMine, icon),
+              ),
+              Positioned(
+                right: 6,
+                bottom: 6,
+                child: _DownloadIconButton(onPressed: () => _downloadAttachment(attachment)),
+              ),
+            ],
           ),
         ),
       );
@@ -918,6 +932,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 ],
               ),
             ),
+            IconButton(
+              onPressed: () => _downloadAttachment(attachment),
+              icon: Icon(Icons.download_outlined, color: foreground, size: 20),
+              tooltip: 'Télécharger',
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+            ),
           ],
         ),
       ),
@@ -933,6 +954,47 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   Future<void> _openAttachment(String url) async {
     final uri = Uri.parse(url);
     await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
+  /// Télécharge une pièce jointe (image, audio, document...) sur
+  /// l'appareil — comme le bouton "Télécharger" de WhatsApp — et affiche
+  /// le résultat dans un SnackBar.
+  Future<void> _downloadAttachment(AttachmentModel attachment) async {
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(
+      const SnackBar(content: Text('Téléchargement en cours...'), duration: Duration(seconds: 2)),
+    );
+
+    final defaultName = 'fichier_${attachment.id.substring(0, 8)}${_guessExtension(attachment)}';
+    final result = await DownloadService.instance.downloadAttachment(
+      url: attachment.fileUrl,
+      suggestedFileName: attachment.fileName ?? defaultName,
+    );
+
+    if (!mounted) return;
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(
+          result.success
+              ? 'Téléchargé : ${result.filePath!.split('/').last}'
+              : (result.error ?? 'Téléchargement impossible'),
+        ),
+      ),
+    );
+  }
+
+  String _guessExtension(AttachmentModel attachment) {
+    switch (attachment.fileType) {
+      case AttachmentType.image:
+        return '.jpg';
+      case AttachmentType.audio:
+        return '.m4a';
+      case AttachmentType.pdf:
+        return '.pdf';
+      case AttachmentType.document:
+        return '';
+    }
   }
 
   /// Aperçu compact du message cité, affiché en haut de la bulle de réponse
@@ -1356,7 +1418,37 @@ class _VoiceMessageBubbleState extends State<_VoiceMessageBubble> {
               ],
             ),
           ),
+          const SizedBox(width: 4),
+          IconButton(
+            onPressed: () => _downloadVoiceMessage(context),
+            icon: Icon(Icons.download_outlined, color: secondary, size: 18),
+            tooltip: 'Télécharger',
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+          ),
         ],
+      ),
+    );
+  }
+
+  Future<void> _downloadVoiceMessage(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(
+      const SnackBar(content: Text('Téléchargement en cours...'), duration: Duration(seconds: 2)),
+    );
+    final result = await DownloadService.instance.downloadAttachment(
+      url: widget.attachment.fileUrl,
+      suggestedFileName: widget.attachment.fileName ?? 'message_vocal_${widget.attachment.id.substring(0, 8)}.m4a',
+    );
+    if (!mounted) return;
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(
+          result.success
+              ? 'Téléchargé : ${result.filePath!.split('/').last}'
+              : (result.error ?? 'Téléchargement impossible'),
+        ),
       ),
     );
   }
@@ -1366,4 +1458,28 @@ String _formatDuration(Duration duration) {
   final minutes = duration.inMinutes.remainder(60).toString().padLeft(2, '0');
   final seconds = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
   return '$minutes:$seconds';
+}
+
+/// Petit bouton rond semi-transparent façon WhatsApp, posé sur une image,
+/// pour la télécharger sans avoir à l'ouvrir en plein écran d'abord.
+class _DownloadIconButton extends StatelessWidget {
+  const _DownloadIconButton({required this.onPressed});
+
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.black.withValues(alpha: 0.45),
+      shape: const CircleBorder(),
+      child: InkWell(
+        onTap: onPressed,
+        customBorder: const CircleBorder(),
+        child: const Padding(
+          padding: EdgeInsets.all(6),
+          child: Icon(Icons.download_outlined, color: Colors.white, size: 18),
+        ),
+      ),
+    );
+  }
 }

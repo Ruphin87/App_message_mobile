@@ -221,6 +221,12 @@ class SettingsScreen extends ConsumerWidget {
           _sectionLabel('Informations'),
           _settingsCard([
             _SettingsTile(
+              icon: Icons.system_update_outlined,
+              title: 'Mise à jour',
+              subtitle: 'Vérifier les mises à jour de l\'application',
+              onTap: () => context.push(AppRoutes.update),
+            ),
+            _SettingsTile(
               icon: Icons.info_outline,
               title: 'À propos de l\'application',
               subtitle: 'Développeurs, contact, version',

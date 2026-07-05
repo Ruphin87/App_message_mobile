@@ -68,5 +68,14 @@
             <action android:name="android.intent.action.DIAL"/>
             <data android:scheme="tel"/>
         </intent>
+        <!-- Requis par url_launcher pour ouvrir le site web de mise à jour
+             (écran Paramètres > Mise à jour) dans le navigateur, sur
+             certaines versions/constructeurs Android particulièrement
+             strictes sur la visibilité des paquets (API 30+). -->
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <category android:name="android.intent.category.BROWSABLE"/>
+            <data android:scheme="https"/>
+        </intent>
     </queries>
 </manifest>

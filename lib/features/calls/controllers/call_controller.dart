@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/services/call_sound_service.dart';
 import '../../../models/call_model.dart';
 import '../../../models/user_model.dart';
 import '../repositories/call_repository.dart';
@@ -49,6 +50,10 @@ class IncomingCallNotifier extends StateNotifier<IncomingCallState> {
 
   Future<void> _handleIncomingCalls(List<CallModel> calls) async {
     if (calls.isEmpty) {
+      // Plus aucun appel entrant en attente (refusé, décroché ailleurs,
+      // annulé par l'appelant, ou expiré) : on coupe la sonnerie et on
+      // referme l'écran d'appel entrant s'il était affiché.
+      await CallSoundService.instance.stop();
       state = state.copyWith(clearCall: true, isLoading: false);
       return;
     }
@@ -57,6 +62,10 @@ class IncomingCallNotifier extends StateNotifier<IncomingCallState> {
     if (state.call?.id == latest.id && state.caller != null) return;
 
     state = state.copyWith(call: latest, isLoading: true, error: null);
+    // La sonnerie démarre dès qu'on sait qu'un appel entrant existe, sans
+    // attendre le chargement du profil de l'appelant — exactement comme un
+    // téléphone classique qui sonne immédiatement à réception de l'appel.
+    unawaited(CallSoundService.instance.playIncomingRingtone());
     try {
       final caller = await _repository.getUser(latest.callerId);
       if (!mounted) return;
@@ -67,22 +76,32 @@ class IncomingCallNotifier extends StateNotifier<IncomingCallState> {
     }
   }
 
+  Future<void> acceptCurrentCall() async {
+    final call = state.call;
+    if (call == null) return;
+    await CallSoundService.instance.stop();
+    await _repository.acceptCall(call.id);
+  }
+
   Future<void> declineCurrentCall() async {
     final call = state.call;
     if (call == null) return;
 
+    await CallSoundService.instance.stop();
     await _repository.declineCall(call.id);
     if (!mounted) return;
     state = state.copyWith(clearCall: true);
   }
 
   void clear() {
+    CallSoundService.instance.stop();
     state = state.copyWith(clearCall: true);
   }
 
   @override
   void dispose() {
     _subscription?.cancel();
+    CallSoundService.instance.stop();
     super.dispose();
   }
 }

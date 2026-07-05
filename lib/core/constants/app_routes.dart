@@ -15,6 +15,7 @@ class AppRoutes {
   static const String contacts = '/contacts';
   static const String searchUser = '/contacts/search';
   static const String friendRequests = '/contacts/requests';
+  static const String friendProfile = '/contacts/profile';
 
   // Phase 3 - Chat
   static const String chatList = '/chat';
@@ -29,6 +30,7 @@ class AppRoutes {
   // Paramètres / À propos
   static const String settings = '/profile/settings';
   static const String about = '/profile/about';
+  static const String update = '/profile/settings/update';
 
   // Phase 9 - Administration
   static const String admin = '/admin';
