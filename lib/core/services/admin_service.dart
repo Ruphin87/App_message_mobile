@@ -1,6 +1,6 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 import './security_service.dart';
-import '../../../core/services/supabase_service.dart';
+import './supabase_service.dart';
 
 /// Service d'administration pour gérer l'application
 class AdminService {
