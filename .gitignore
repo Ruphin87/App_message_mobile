@@ -55,3 +55,6 @@ android/build/
 
 # VS Code
 .vscode/
+android/key.properties
+android/release-key.jks
+*.jks
