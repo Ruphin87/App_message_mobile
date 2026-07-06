@@ -60,3 +60,11 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: build/app/outputs/flutter-apk/app-release.apk
+
+      - name: Workflow Summary
+        run: |
+          echo "# 📱 Application Mobile" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Pipeline" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ App → 🚀 Deployment → 🧪 Tests → 👤 User" >> $GITHUB_STEP_SUMMARY
