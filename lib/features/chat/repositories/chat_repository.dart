@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart' show compute;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../core/services/supabase_service.dart';
 import '../../../core/services/presence_service.dart';
 import '../../../core/services/local_database_service.dart';
+import '../../../core/utils/message_isolate_utils.dart';
 import '../../../models/attachment_model.dart';
 import '../../../models/conversation_model.dart';
 import '../../../models/message_model.dart';
@@ -193,26 +195,16 @@ class ChatRepository {
     if (ownerId == null) return [];
 
     final rows = await _localDb.getMessages(ownerId, conversationId);
-    var messages = rows.map((r) => MessageModel.fromLocalDb(r)).toList();
-    messages.sort((a, b) => a.createdAt.compareTo(b.createdAt));
-    messages = messages.where((m) => !m.isHiddenFor(ownerId)).toList();
-    return _attachReplyPreviewsLocal(ownerId, messages);
-  }
+    if (rows.isEmpty) return [];
 
-  /// Reconstitue `replyToPreview` pour chaque message qui répond à un
-  /// autre, en cherchant le message cité directement dans la liste déjà
-  /// chargée (rapide, pas de requête supplémentaire dans le cas courant où
-  /// le message cité fait partie du même historique affiché).
-  Future<List<MessageModel>> _attachReplyPreviewsLocal(
-    String ownerId,
-    List<MessageModel> messages,
-  ) async {
-    final byId = {for (final m in messages) m.id: m};
-    return messages.map((m) {
-      if (m.replyToId == null) return m;
-      final preview = byId[m.replyToId];
-      return preview != null ? m.copyWith(replyToPreview: preview) : m;
-    }).toList();
+    // Parsing + tri + filtrage + reconstruction des réponses tournent dans
+    // un ISOLATE SÉPARÉ (compute) : même avec des milliers de messages en
+    // cache local, l'UI ne se fige jamais pendant ce traitement.
+    final processed = await compute(
+      processMessages,
+      MessageParseInput(rows: rows, fromLocalDb: true, ownerId: ownerId),
+    );
+    return processed.forDisplay;
   }
 
   /// Historique des messages d'une conversation depuis SUPABASE, du plus
@@ -229,20 +221,24 @@ class ChatRepository {
         .eq('conversation_id', conversationId)
         .order('created_at', ascending: true);
 
-    final messages = (response as List)
-        .map((json) => MessageModel.fromJson(json as Map<String, dynamic>))
-        .toList();
-    messages.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    final rawRows = (response as List).cast<Map<String, dynamic>>();
+    if (rawRows.isEmpty) return [];
 
     final ownerId = _ownerId;
+
+    // Parsing + tri + conversion cache local + filtrage + reconstruction des
+    // réponses tournent dans un ISOLATE SÉPARÉ (compute), donc en parallèle
+    // du thread UI, quelle que soit la taille de l'historique.
+    final processed = await compute(
+      processMessages,
+      MessageParseInput(rows: rawRows, fromLocalDb: false, ownerId: ownerId),
+    );
+
     if (ownerId != null) {
-      await _localDb.upsertMessages(ownerId, messages.map((m) => m.toLocalDb()).toList());
+      await _localDb.upsertMessages(ownerId, processed.forLocalDb);
     }
 
-    final visible =
-        ownerId != null ? messages.where((m) => !m.isHiddenFor(ownerId)).toList() : messages;
-
-    return ownerId != null ? await _attachReplyPreviewsLocal(ownerId, visible) : visible;
+    return processed.forDisplay;
   }
 
   /// Envoie un nouveau message texte dans une conversation.
@@ -486,28 +482,39 @@ class ChatRepository {
   /// déjà reçue (ex: `markMessagesAsRead`/`markMessagesAsDelivered`, qui
   /// font justement un UPDATE à chaque ouverture de conversation). Ce tri
   /// explicite garantit l'ordre quel que soit le comportement du SDK.
+  ///
+  /// IMPORTANT (performance) : le SDK Supabase réémet la LISTE COMPLÈTE de
+  /// la conversation à chaque changement (nouveau message, mais aussi
+  /// simple accusé de lecture/livraison). Sur une conversation qui grandit
+  /// (des milliers de messages), reparser/trier/filtrer cette liste entière
+  /// à CHAQUE événement, sur le thread UI, est exactement ce qui cause le
+  /// ralentissement de l'application. Ce traitement est donc délégué à un
+  /// ISOLATE SÉPARÉ (`compute`) : le thread UI reste libre pendant que
+  /// l'isolate fait le travail, quelle que soit la fréquence des événements
+  /// ou la taille de l'historique.
   Stream<List<MessageModel>> watchMessages(String conversationId) {
     return _client
         .from('messages')
         .stream(primaryKey: ['id'])
         .eq('conversation_id', conversationId)
         .order('created_at', ascending: true)
-        .map((rows) => rows.map((row) => MessageModel.fromJson(row)).toList())
-        .asyncMap((messages) async {
-      // Tri explicite par date croissante (ancien → récent), indépendant du
-      // tri renvoyé par le SDK — garantit que le dernier message est
-      // toujours en dernière position de la liste, donc en bas de l'écran.
-      final sorted = [...messages]..sort((a, b) => a.createdAt.compareTo(b.createdAt));
-
+        .asyncMap((rows) async {
       final ownerId = _ownerId;
-      if (ownerId == null) return sorted;
+      final rawRows = rows.cast<Map<String, dynamic>>();
+      if (rawRows.isEmpty) return <MessageModel>[];
 
-      if (sorted.isNotEmpty) {
-        _localDb.upsertMessages(ownerId, sorted.map((m) => m.toLocalDb()).toList());
+      final processed = await compute(
+        processMessages,
+        MessageParseInput(rows: rawRows, fromLocalDb: false, ownerId: ownerId),
+      );
+
+      if (ownerId != null && processed.forLocalDb.isNotEmpty) {
+        // Best-effort, pas besoin d'attendre : ne doit jamais retarder
+        // l'affichage des nouveaux messages.
+        unawaited(_localDb.upsertMessages(ownerId, processed.forLocalDb));
       }
 
-      final visible = sorted.where((m) => !m.isHiddenFor(ownerId)).toList();
-      return _attachReplyPreviewsLocal(ownerId, visible);
+      return processed.forDisplay;
     });
   }
 
