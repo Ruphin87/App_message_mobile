@@ -60,3 +60,6 @@ android/release-key.jks
 *.jks
 android/build/
 supabase/.temp/
+android/release-key.jks
+keystore_base64.txt
+android/key.properties
