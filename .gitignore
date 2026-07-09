@@ -58,3 +58,5 @@ android/build/
 android/key.properties
 android/release-key.jks
 *.jks
+android/build/
+supabase/.temp/

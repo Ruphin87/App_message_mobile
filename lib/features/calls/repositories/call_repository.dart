@@ -145,4 +145,22 @@ class CallRepository {
         .order('created_at')
         .map((rows) => rows.map((row) => CallEventModel.fromJson(row)).toList());
   }
+
+  /// Récupère des identifiants STUN/TURN frais pour un appel, via l'Edge
+  /// Function `get-turn-credentials`. La clé API Metered reste toujours
+  /// côté serveur — jamais embarquée dans l'app. Retourne `null` en cas
+  /// d'échec (réseau, quota Metered dépassé, etc.) : l'appelant doit alors
+  /// se rabattre sur une configuration ICE de secours.
+  Future<List<Map<String, dynamic>>?> getTurnCredentials() async {
+    try {
+      final response = await _client.functions.invoke('get-turn-credentials');
+      final data = response.data;
+      if (data is Map && data['ok'] == true && data['iceServers'] is List) {
+        return (data['iceServers'] as List).cast<Map<String, dynamic>>();
+      }
+    } catch (_) {
+      // Best-effort — l'appelant utilise sa configuration de secours.
+    }
+    return null;
+  }
 }

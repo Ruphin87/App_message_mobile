@@ -157,12 +157,51 @@ class _CallScreenState extends ConsumerState<CallScreen> {
     _localRenderer.srcObject = _localStream;
   }
 
+  // ============================================================
+  // Configuration TURN — récupérée via l'Edge Function sécurisée
+  // `get-turn-credentials` (la clé API Metered reste côté serveur, jamais
+  // dans l'app). En cas d'échec, on retombe sur [_fallbackIceServers].
+  // ============================================================
+
+  /// Solution de secours si l'Edge Function est injoignable ou si le quota
+  /// gratuit Metered (500 Mo/mois) est dépassé un mois donné : un serveur
+  /// TURN public partagé (Open Relay). Moins fiable que Metered, mais évite
+  /// que l'appel échoue complètement.
+  static const List<Map<String, dynamic>> _fallbackIceServers = [
+    {'urls': 'stun:stun.l.google.com:19302'},
+    {'urls': 'stun:stun1.l.google.com:19302'},
+    {
+      'urls': 'turn:openrelay.metered.ca:80',
+      'username': 'openrelayproject',
+      'credential': 'openrelayproject',
+    },
+    {
+      'urls': 'turn:openrelay.metered.ca:443',
+      'username': 'openrelayproject',
+      'credential': 'openrelayproject',
+    },
+    {
+      'urls': 'turn:openrelay.metered.ca:443?transport=tcp',
+      'username': 'openrelayproject',
+      'credential': 'openrelayproject',
+    },
+  ];
+
+  /// Récupère des identifiants STUN/TURN frais pour CET appel précis, via
+  /// l'Edge Function sécurisée. En cas de souci, on retombe sur
+  /// [_fallbackIceServers] plutôt que de faire planter l'appel.
+  Future<List<Map<String, dynamic>>> _fetchIceServers() async {
+    final credentials = await ref.read(callRepositoryProvider).getTurnCredentials();
+    if (credentials != null && credentials.isNotEmpty) {
+      return credentials;
+    }
+    return _fallbackIceServers;
+  }
+
   Future<void> _createPeerConnection() async {
+    final iceServers = await _fetchIceServers();
     final configuration = <String, dynamic>{
-      'iceServers': [
-        {'urls': 'stun:stun.l.google.com:19302'},
-        {'urls': 'stun:stun1.l.google.com:19302'},
-      ],
+      'iceServers': iceServers,
     };
 
     final pc = await createPeerConnection(configuration);
